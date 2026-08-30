@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VMStream - Owner</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>Owner Dashboard</h1>
+      <div>
+        <a href="/dashboard.html">Back to app</a>
+        <button id="logoutBtn">Log out</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Users</h2>
+      <table id="usersTable">
+        <thead><tr><th>Username</th><th>Credits</th><th>Owner</th><th>Locked game</th><th>Adjust</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Recent instances</h2>
+      <table id="instancesTable">
+        <thead><tr><th>User</th><th>VMID</th><th>IP</th><th>Status</th><th>Minutes billed</th><th>Started</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p id="error" class="error"></p>
+  </div>
+  <script src="/js/app.js"></script>
+  <script>
+    logoutBtn.onclick = async () => { await api('/api/auth/logout', {}); location.href = '/'; };
+
+    async function loadUsers() {
+      const { users, error: err } = await fetch('/api/owner/users').then(r => r.json());
+      if (err) { error.textContent = err; return; }
+      usersTable.querySelector('tbody').innerHTML = users.map(u => `
+        <tr>
+          <td>${u.username}</td>
+          <td>${u.credits}</td>
+          <td>${u.is_owner ? 'yes' : ''}</td>
+          <td>${u.locked_game_id || '-'} ${u.locked_game_id ? `<button onclick="resetGame(${u.id})">Reset</button>` : ''}</td>
+          <td>
+            <input type="number" id="adj-${u.id}" style="width:60px" value="10">
+            <button onclick="adjust(${u.id})">Apply</button>
+          </td>
+        </tr>`).join('');
+    }
+
+    async function loadInstances() {
+      const { instances, error: err } = await fetch('/api/owner/instances').then(r => r.json());
+      if (err) { error.textContent = err; return; }
+      instancesTable.querySelector('tbody').innerHTML = instances.map(i => `
+        <tr>
+          <td>${i.username}</td><td>${i.vmid}</td><td>${i.ip || ''}</td>
+          <td>${i.status}</td><td>${i.minutes_billed}</td><td>${i.started_at}</td>
+        </tr>`).join('');
+    }
+
+    window.adjust = async (userId) => {
+      const delta = Number(document.getElementById(`adj-${userId}`).value);
+      await api('/api/owner/credits/adjust', { userId, delta, reason: 'owner adjustment' });
+      loadUsers();
+    };
+
+    window.resetGame = async (userId) => {
+      await api('/api/owner/reset-game', { userId });
+      loadUsers();
+    };
+
+    loadUsers();
+    loadInstances();
+    setInterval(loadInstances, 10000);
+  </script>
+</body>
+</html>
