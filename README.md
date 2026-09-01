@@ -175,7 +175,41 @@ from the browser," that's what this repo already does; if it's about
 getting past detection specifically, that's a different (and
 ToS-violating) ask.
 
+## 3.6. Accounts + credits (users spend 1 credit/minute)
+
+The signup/login/credits system is a **separate service from the Redroid
+hosts** — `accounts/accounts.py`. It owns user accounts, password hashes
+(bcrypt), and a credit balance, and issues JWTs for the frontend to use.
+
+Run it (anywhere — doesn't need GPU or binder, just a small VM or container):
+```bash
+cd accounts
+pip install -r requirements.txt
+export JWT_SECRET="$(openssl rand -hex 32)"   # generate once, keep stable across restarts
+uvicorn accounts:app --host 0.0.0.0 --port 8001
+```
+
+**Billing flow:**
+1. Frontend calls `/signup` or `/login` on the accounts service → gets a JWT
+2. Frontend calls the broker's `POST /session/start` with `Authorization: Bearer <jwt>`
+3. The broker calls accounts' `/billing/session/start` first — if the user has
+   less than 1 credit, it's rejected (`402`) before any Redroid pod is created
+4. Once billing is reserved, the broker schedules the Redroid pod as before
+5. A background loop in the broker calls `/billing/session/{id}/tick` every
+   60 seconds, deducting 1 credit per elapsed minute
+6. When the tick response says `should_continue: false` (balance hit 0), the
+   broker automatically tears down the session and stops billing
+
+Set `ACCOUNTS_URL` as an env var on the broker (defaults to
+`http://accounts:8001`) so it knows where to reach the accounts service.
+
+**What's stubbed, not built:** `/credits/add` just adds credits directly with
+no payment check — it's there so you can test the billing flow, but you
+need to put a real payment processor (Stripe, etc.) in front of it and only
+call it after a verified successful charge before this handles real money.
+
 ## 4. Things this reference implementation doesn't handle yet (your homework)
+
 
 - **Auth** — `/session/start` is wide open right now. Put real auth in front of the broker API before exposing it publicly.
 - **Persistent user data** — each session gets a fresh `emptyDir`. If you want "my apps stay installed between sessions," back the volume with NFS/Ceph keyed by user ID instead of session ID.
@@ -194,7 +228,8 @@ NoobsCloud/
 ├── scripts/        # install-binder-modules.sh — the kernel module bit
 ├── k3s/            # Per-session Redroid Deployment+Service template
 ├── docker/          # Alternative: docker-compose template if you skip k3s
-├── broker/         # FastAPI service: schedules sessions, wires routing, app launch
+├── broker/         # FastAPI service: schedules sessions, wires routing, app launch, billing calls
+├── accounts/        # Separate service: signup/login, JWTs, credit balances, session billing
 ├── traefik/        # Gateway config + where broker drops per-session routes
 └── docs/           # Standalone Redroid setup guide + frontend launch-button snippet
 ```

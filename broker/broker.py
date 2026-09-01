@@ -17,9 +17,12 @@ Docker SDK calls if you go the docker-compose-per-node route instead of k3s.
 import subprocess
 import time
 import uuid
+import os
+import asyncio
+import httpx
 import yaml
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from kubernetes import client, config
 
 app = FastAPI(title="NoobsCloud Broker")
@@ -28,6 +31,9 @@ NAMESPACE = "noobscloud"
 MANIFEST_TEMPLATE = Path(__file__).parent.parent / "k3s" / "redroid-deployment.yaml"
 TRAEFIK_DYNAMIC_DIR = Path(__file__).parent.parent / "traefik" / "sessions"
 TRAEFIK_DYNAMIC_DIR.mkdir(parents=True, exist_ok=True)
+
+ACCOUNTS_URL = os.environ.get("ACCOUNTS_URL", "http://accounts:8001")
+BILLING_TICK_SECONDS = 60
 
 config.load_kube_config()  # or load_incluster_config() if broker runs inside the cluster
 apps_v1 = client.AppsV1Api()
@@ -98,8 +104,22 @@ def write_traefik_route(session_id: str, pod_ip: str):
 
 
 @app.post("/session/start")
-def start_session():
-    session_id = uuid.uuid4().hex[:12]
+async def start_session(authorization: str = Header(...)):
+    async with httpx.AsyncClient() as http:
+        # Reserve the session with accounts FIRST — before spinning up any
+        # infrastructure — so we never bill someone for a session that
+        # failed to actually reserve credits, and never give away free
+        # compute to someone with zero balance.
+        session_id = uuid.uuid4().hex[:12]
+        resp = await http.post(
+            f"{ACCOUNTS_URL}/billing/session/start",
+            json={"session_id": session_id},
+            headers={"Authorization": authorization},
+        )
+        if resp.status_code == 402:
+            raise HTTPException(402, "Insufficient credits")
+        resp.raise_for_status()
+
     node = pick_node()
 
     for obj in render_manifest(session_id):
@@ -113,6 +133,8 @@ def start_session():
     write_traefik_route(session_id, pod_ip)
 
     sessions[session_id] = {"node": node, "pod_ip": pod_ip}
+    asyncio.create_task(bill_session_until_stopped(session_id))
+
     return {
         "session_id": session_id,
         "node": node,
@@ -120,18 +142,51 @@ def start_session():
     }
 
 
-@app.post("/session/{session_id}/stop")
-def stop_session(session_id: str):
-    if session_id not in sessions:
-        raise HTTPException(404, "Unknown session")
+async def bill_session_until_stopped(session_id: str):
+    """Background loop: charge 1 credit/minute, tear the session down when
+    the user runs out. Runs for as long as the session exists."""
+    async with httpx.AsyncClient() as http:
+        while session_id in sessions:
+            await asyncio.sleep(BILLING_TICK_SECONDS)
+            if session_id not in sessions:
+                return
+            try:
+                resp = await http.post(f"{ACCOUNTS_URL}/billing/session/{session_id}/tick")
+                resp.raise_for_status()
+                result = resp.json()
+            except httpx.HTTPError:
+                # Accounts service unreachable — fail safe by stopping the
+                # session rather than giving away free compute indefinitely.
+                result = {"should_continue": False}
 
+            if not result.get("should_continue", False):
+                _teardown_session(session_id)
+                await http.post(f"{ACCOUNTS_URL}/billing/session/{session_id}/stop")
+                return
+
+
+def _teardown_session(session_id: str):
+    """Shared teardown logic used by both explicit stop and out-of-credits auto-stop."""
+    if session_id not in sessions:
+        return
     apps_v1.delete_namespaced_deployment(f"redroid-{session_id}", NAMESPACE)
     core_v1.delete_namespaced_service(f"redroid-{session_id}", NAMESPACE)
     route_file = TRAEFIK_DYNAMIC_DIR / f"{session_id}.yml"
     if route_file.exists():
         route_file.unlink()
-
     del sessions[session_id]
+
+
+@app.post("/session/{session_id}/stop")
+async def stop_session(session_id: str):
+    if session_id not in sessions:
+        raise HTTPException(404, "Unknown session")
+
+    _teardown_session(session_id)
+
+    async with httpx.AsyncClient() as http:
+        await http.post(f"{ACCOUNTS_URL}/billing/session/{session_id}/stop")
+
     return {"status": "stopped"}
 
 

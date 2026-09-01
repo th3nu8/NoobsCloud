@@ -9,8 +9,20 @@ variable "proxmox_api_token" {
   sensitive   = true
 }
 
+variable "proxmox_node_name" {
+  description = "The actual Proxmox cluster node name these worker VMs are created on"
+  type        = string
+  default     = "optiplex-i5-4750"
+}
+
+variable "template_vm_id" {
+  description = "VMID of the Debian 13.3.0 cloud-init template to clone from"
+  type        = number
+  default     = 300
+}
+
 variable "worker_nodes" {
-  description = "Map of Proxmox node name -> Docker-host VM config to create on it"
+  description = "Map of worker VM label -> Docker-host VM config. Each entry becomes one VM on proxmox_node_name."
   type = map(object({
     vm_id   = number
     cores   = number
@@ -20,8 +32,10 @@ variable "worker_nodes" {
     gateway = string
   }))
   default = {
-    "pve-node1" = {
-      vm_id   = 9101
+    # VMIDs 301-399 reserved for these workers. Add more entries here as you
+    # scale out — e.g. "worker-2" with vm_id = 302, next free IP, etc.
+    "worker-1" = {
+      vm_id   = 301
       cores   = 8
       memory  = 16384
       disk_gb = 80

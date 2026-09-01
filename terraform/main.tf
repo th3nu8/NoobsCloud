@@ -13,17 +13,18 @@ provider "proxmox" {
   insecure  = true # set false once you have a real cert on the Proxmox API
 }
 
-# One Docker-host VM per Proxmox node, built from a cloud-init-enabled
-# Debian 13.3.0 (Trixie) template you've already prepared (see README step 2).
+# Multiple Docker-host VMs on the same Proxmox node (var.proxmox_node_name),
+# each cloned from a cloud-init-enabled Debian 13.3.0 (Trixie) template
+# (see README step 2). VMIDs 301-399 reserved for these workers.
 resource "proxmox_virtual_environment_vm" "docker_host" {
   for_each = var.worker_nodes
 
   name      = "noobscloud-${each.key}"
-  node_name = each.key
+  node_name = var.proxmox_node_name
   vm_id     = each.value.vm_id
 
   clone {
-    vm_id = 9000 # your Debian 13.3.0 cloud-init template's VMID
+    vm_id = var.template_vm_id
     full  = true
   }
 
