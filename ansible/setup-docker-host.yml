@@ -1,0 +1,38 @@
+---
+# Run after terraform apply: ansible-playbook -i inventory.ini setup-docker-host.yml
+- name: Prepare NoobsCloud Redroid worker
+  hosts: workers
+  become: true
+  vars:
+    k3s_url: "https://{{ hostvars[groups['control'][0]]['ansible_host'] }}:6443"
+    # Set via --extra-vars or a vaulted vars file — never commit this token.
+    k3s_token: "{{ lookup('env', 'K3S_TOKEN') }}"
+
+  tasks:
+    - name: Install Docker
+      shell: curl -fsSL https://get.docker.com | sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: Copy binder module install script
+      copy:
+        src: ../scripts/install-binder-modules.sh
+        dest: /root/install-binder-modules.sh
+        mode: "0755"
+
+    - name: Install binder/ashmem kernel modules
+      command: /root/install-binder-modules.sh
+      args:
+        creates: /etc/modules-load.d/redroid.conf
+
+    - name: Join node to k3s cluster as agent
+      shell: |
+        curl -sfL https://get.k3s.io | \
+          K3S_URL={{ k3s_url }} K3S_TOKEN={{ k3s_token }} sh -
+      args:
+        creates: /etc/rancher/k3s/k3s.yml.d
+
+    - name: Label node as redroid-capable
+      delegate_to: "{{ groups['control'][0] }}"
+      command: >
+        kubectl label node {{ inventory_hostname }} redroid.io/capable=true --overwrite

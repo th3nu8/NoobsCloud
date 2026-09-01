@@ -1,0 +1,20 @@
+http:
+  routers:
+    frontend:
+      rule: "PathPrefix(`/`)"
+      service: frontend
+      priority: 1
+    broker-api:
+      rule: "PathPrefix(`/api`)"
+      service: broker-api
+      priority: 10
+
+  services:
+    frontend:
+      loadBalancer:
+        servers:
+          - url: "http://web-scrcpy:8080"
+    broker-api:
+      loadBalancer:
+        servers:
+          - url: "http://broker:8000"

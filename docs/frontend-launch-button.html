@@ -1,0 +1,58 @@
+<!--
+  Game picker snippet. Drop this into whatever page hosts your web-scrcpy
+  viewer, alongside the session controls. Assumes the broker API is
+  reachable at /api (routed by Traefik — see traefik/dynamic.yml).
+
+  Shows a grid of known games (from broker's KNOWN_APPS) plus a manual
+  "launch by package name" field so users aren't limited to that list —
+  any installed app can be launched.
+
+  This only sends an intent to bring an already-installed app to the
+  foreground — it does not install anything. Install the APK once inside
+  a session first (docs/redroid-setup.md step 6, or sign into Play Store
+  within the session like a normal device). Sessions don't currently
+  persist installed apps between runs (see README section 4).
+-->
+<div id="game-picker">
+  <div id="game-grid"></div>
+
+  <form id="launch-by-package-form">
+    <input type="text" id="package-input" placeholder="or launch by package name, e.g. com.example.app" />
+    <button type="submit">Launch</button>
+  </form>
+</div>
+
+<script>
+  const sessionId = window.NOOBSCLOUD_SESSION_ID; // set this when the session starts
+
+  async function launch(pathSuffix) {
+    const res = await fetch(`/api/session/${sessionId}/launch/${pathSuffix}`, { method: "POST" });
+    if (!res.ok) {
+      const err = await res.json();
+      alert(err.detail || "Launch failed");
+      return;
+    }
+    console.log(`Launched ${pathSuffix}`);
+  }
+
+  async function buildGrid() {
+    const apps = await (await fetch("/api/apps")).json(); // { "clash-royale": "com.supercell.clashroyale", ... }
+    const grid = document.getElementById("game-grid");
+    grid.innerHTML = "";
+    for (const [key, packageName] of Object.entries(apps)) {
+      const btn = document.createElement("button");
+      btn.textContent = key.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      btn.title = packageName;
+      btn.addEventListener("click", () => launch(key));
+      grid.appendChild(btn);
+    }
+  }
+
+  document.getElementById("launch-by-package-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const pkg = document.getElementById("package-input").value.trim();
+    if (pkg) launch(`by-package/${encodeURIComponent(pkg)}`);
+  });
+
+  buildGrid();
+</script>

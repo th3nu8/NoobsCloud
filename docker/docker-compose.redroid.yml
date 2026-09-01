@@ -1,0 +1,34 @@
+# Template compose file for ONE Redroid session.
+# The broker (see /broker) generates a copy of this per session with unique
+# ports and a unique container name, then runs `docker compose -f <file> up -d`.
+#
+# Placeholders (substituted by broker/broker.py):
+#   {{SESSION_ID}}   - unique id, used for container/volume naming
+#   {{ADB_PORT}}     - host port mapped to container's adb (5555)
+#   {{SCRCPY_PORT}}  - host port used by web-scrcpy's websocket bridge
+#   {{GPU_DEVICE}}   - optional /dev/dri or vGPU device path, empty for software rendering
+
+services:
+  redroid-{{SESSION_ID}}:
+    image: redroid/redroid:13.0.0-latest
+    container_name: redroid-{{SESSION_ID}}
+    privileged: true
+    ports:
+      - "{{ADB_PORT}}:5555"
+    volumes:
+      - redroid-data-{{SESSION_ID}}:/data
+    devices:
+      - /dev/binderfs:/dev/binderfs
+      # Uncomment if node has GPU passthrough configured:
+      # - {{GPU_DEVICE}}:{{GPU_DEVICE}}
+    environment:
+      - androidboot.redroid_width=1080
+      - androidboot.redroid_height=1920
+      - androidboot.redroid_fps=60
+      # Set to "host" only if virglrenderer/gfxstream + GPU passthrough is configured on this node
+      - androidboot.redroid_gpu_mode=guest
+    restart: unless-stopped
+
+volumes:
+  redroid-data-{{SESSION_ID}}:
+    name: redroid-data-{{SESSION_ID}}

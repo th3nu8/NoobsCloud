@@ -1,0 +1,17 @@
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  file:
+    directory: /etc/traefik/sessions
+    watch: true
+
+api:
+  dashboard: true
+
+# Add a certResolver here (e.g. Let's Encrypt via DNS-01) once you point
+# a real domain at the gateway node. Until then, run behind your existing
+# Cloudflare Tunnel to 127.0.0.1:80 the same way pdc-hq-web does.

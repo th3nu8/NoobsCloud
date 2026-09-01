@@ -1,0 +1,82 @@
+# Template — the broker applies a copy of this per session with substituted
+# {{SESSION_ID}} via `envsubst` or a templating lib before `kubectl apply -f -`.
+#
+# Prereqs on every worker node joined to the k3s cluster:
+#   - binder_linux / ashmem_linux modules loaded (see scripts/install-binder-modules.sh)
+#   - node labeled: kubectl label node <name> redroid.io/capable=true
+#   - (optional GPU) node labeled: kubectl label node <name> redroid.io/gpu=true
+#     and the appropriate device plugin DaemonSet running (e.g. nvidia-device-plugin)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redroid-{{SESSION_ID}}
+  namespace: noobscloud
+  labels:
+    app: redroid
+    session: "{{SESSION_ID}}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      session: "{{SESSION_ID}}"
+  template:
+    metadata:
+      labels:
+        app: redroid
+        session: "{{SESSION_ID}}"
+    spec:
+      nodeSelector:
+        redroid.io/capable: "true"
+      containers:
+        - name: redroid
+          image: redroid/redroid:13.0.0-latest
+          securityContext:
+            privileged: true
+          ports:
+            - containerPort: 5555
+              name: adb
+          env:
+            - name: androidboot.redroid_width
+              value: "1080"
+            - name: androidboot.redroid_height
+              value: "1920"
+            - name: androidboot.redroid_fps
+              value: "60"
+            - name: androidboot.redroid_gpu_mode
+              value: "guest" # switch to "host" once GPU passthrough is wired up
+          volumeMounts:
+            - name: binderfs
+              mountPath: /dev/binderfs
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1.5Gi"
+            limits:
+              cpu: "2"
+              memory: "3Gi"
+              # nvidia.com/gpu: 1   # uncomment if scheduling onto a GPU-sliced node
+      volumes:
+        - name: binderfs
+          hostPath:
+            path: /dev/binderfs
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redroid-{{SESSION_ID}}
+  namespace: noobscloud
+  labels:
+    session: "{{SESSION_ID}}"
+spec:
+  selector:
+    session: "{{SESSION_ID}}"
+  ports:
+    - name: adb
+      port: 5555
+      targetPort: 5555
+  type: ClusterIP

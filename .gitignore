@@ -1,0 +1,20 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Kubernetes / broker
+config
+*.kubeconfig
+broker/config
+
+# Ansible
+inventory.ini
+*.retry
+
+# Secrets — never commit these
+*.env
+.env
+*token*
+!scripts/install-binder-modules.sh
